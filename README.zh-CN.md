@@ -1,6 +1,6 @@
 English | 简体中文
 
-# Rail button（侧栏按钮条）
+# RailButton（侧栏按钮条）
 
 Rail button 把任意终端命令变成 Herdr 窗口里的一个按钮：yazi、lazygit、btop、k9s、一行命令起的文件服务、你自己的脚本——终端能跑的，rail 都能装。点一下，命令在当前空间的新 tab 里打开；再点一下，tab 关闭。小表单添加按钮，拖动排序，右键删除。图标按命令名自动匹配——你永远不用挑图标。
 

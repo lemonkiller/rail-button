@@ -1,4 +1,4 @@
-# Rail button
+# RailButton
 
 A 44px sidebar rail with one column of icon buttons, each bound to a terminal command. Click a button and its command opens in a new tab of the current space; click it again and that tab closes. A `+` button at the bottom adds a binding through a small form, holding a button and moving it reorders the rail, right-clicking one asks before deleting it. Two buttons ship seeded — yazi and lazygit — and icons are matched on their own from the command name.
 

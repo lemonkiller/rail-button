@@ -1,6 +1,6 @@
 English | [简体中文](README.zh-CN.md)
 
-# Rail button
+# RailButton
 
 Rail button turns any terminal command into a button in your Herdr window: yazi, lazygit, btop, k9s, a one-line file server, your own scripts — if a terminal can run it, the rail can hold it. One click opens the command in a new tab of the current space; a second click closes it. Add buttons through a small form, drag to reorder, right-click to delete. Icons match themselves from the command name — you never pick one.
 
