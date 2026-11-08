@@ -4,15 +4,17 @@ English | 简体中文
 
 一条 44px 宽的 Herdr 侧栏图标条：一列按钮，每个绑定一条终端命令。点一下按钮，命令在当前空间的新 tab 里打开；再点一下，tab 关闭。通过一个小表单添加自己的按钮，拖动排序，右键删除。图标按命令名自动匹配——你永远不用挑图标。
 
+终端能跑的，rail 都能装——文件管理器、git TUI、系统监控、数据库客户端、一行命令起的服务：整个终端生态，变成 Herdr 窗口里的一个图标。
+
 ![Rail button](preview.png)
 
 ## 安装
 
-在 Herdr 窗口里对 agent 说：
+对 Herdr 窗口里的 agent 说一句话，装 mod 和布点一次完成：
 
-> Read `~/.config/herdr-app/AGENTS.md`, then add this mod: https://github.com/lemonkiller/rail-button
+> Read `~/.config/herdr-app/AGENTS.md`, then add this mod: https://github.com/lemonkiller/rail-button — and add a 44px column with a rail-button block to my current layout (the shape is in the mod README's Requirements).
 
-这个 mod 是 `place: none`，只画在布局给它安排的位置。你的布局需要一根窄列，里面放一个引用该 mod 的 block——见[安装要求](#安装要求)。精确的 node 树见 [RECIPE.md](RECIPE.md)。
+这个 mod 是 `place: none`，只画在布局给它安排的位置——你的布局需要一根窄列，内含一个引用该 mod 的 block。形状见[安装要求](#安装要求)，精确 node 树见 [RECIPE.md](RECIPE.md)。
 
 ## 功能一览
 

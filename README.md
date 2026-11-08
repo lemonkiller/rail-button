@@ -4,15 +4,17 @@ English | [简体中文](README.zh-CN.md)
 
 A 44px icon rail for Herdr: one column of buttons, each bound to a terminal command. Click a button to open the command in a new tab of the current space; click it again to close that tab. Add your own buttons through a small form, reorder them by dragging, and delete them with a right-click. Icons are matched automatically from the command name — you never pick one.
 
+If a terminal can run it, the rail can hold it — file managers, git TUIs, system monitors, database clients, one-liner servers: the whole terminal ecosystem becomes one icon in your Herdr window.
+
 ![Rail button](preview.png)
 
 ## Install
 
-Ask the agent in your Herdr window:
+One sentence to the agent in your Herdr window does both jobs — it installs the mod and puts the rail into the layout you use:
 
-> Read `~/.config/herdr-app/AGENTS.md`, then add this mod: https://github.com/lemonkiller/rail-button
+> Read `~/.config/herdr-app/AGENTS.md`, then add this mod: https://github.com/lemonkiller/rail-button — and add a 44px column with a rail-button block to my current layout (the shape is in the mod README's Requirements).
 
-The mod is `place: none`; it draws only where the layout puts it. Your layout needs a narrow column with a block that references the mod — see [Requirements](#requirements). [RECIPE.md](RECIPE.md) has the exact node tree.
+The mod is `place: none`: it draws only where a layout puts it, so your layout needs one narrow column with a block that references the mod — see [Requirements](#requirements) for the shape, [RECIPE.md](RECIPE.md) for the exact node tree.
 
 ## What it does
 
