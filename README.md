@@ -8,11 +8,17 @@ Rail button turns any terminal command into a button in your Herdr window: yazi,
 
 ## Install
 
-One sentence to the agent in your Herdr window does both jobs — it installs the mod and puts the rail into the layout you use:
+The mod is `place: none`: it draws only where a layout puts it. It can fit itself into whatever layout you are looking at, so no hand-editing is needed:
+
+- Bind a key to it once, in `keys.json`: `"global": { "ctrl-shift-r": "mod.open:rail-button" }`.
+- Press it: the rail comes up as a floating strip in any layout. If that layout has no rail, a **Fit** tile appears at the top of the strip — click it and the 44px column is written into the layout you are looking at, right beside the tab block.
+- Herdr's own layouts (`main`, `terminals`, `win98`) are replaced on every start, so there the Fit saves the shown layout plus the rail under a free personal name (`main-rail`) and switches to it.
+
+The node shape it writes is in [Requirements](#requirements); the exact tree is in [RECIPE.md](RECIPE.md).
+
+Or hand it to the agent in your Herdr window, which installs the mod and puts the rail into the layout you use:
 
 > Read `~/.config/herdr-app/AGENTS.md`, then add this mod: https://github.com/lemonkiller/rail-button — and add a 44px column with a rail-button block to my current layout (the shape is in the mod README's Requirements).
-
-The mod is `place: none`: it draws only where a layout puts it, so your layout needs one narrow column with a block that references the mod — see [Requirements](#requirements) for the shape, [RECIPE.md](RECIPE.md) for the exact node tree.
 
 ## What it does
 
