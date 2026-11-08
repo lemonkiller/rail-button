@@ -2,9 +2,7 @@ English | [简体中文](README.zh-CN.md)
 
 # Rail button
 
-A 44px icon rail for Herdr: one column of buttons, each bound to a terminal command. Click a button to open the command in a new tab of the current space; click it again to close that tab. Add your own buttons through a small form, reorder them by dragging, and delete them with a right-click. Icons are matched automatically from the command name — you never pick one.
-
-If a terminal can run it, the rail can hold it — file managers, git TUIs, system monitors, database clients, one-liner servers: the whole terminal ecosystem becomes one icon in your Herdr window.
+Rail button turns any terminal command into a button in your Herdr window: yazi, lazygit, btop, k9s, a one-line file server, your own scripts — if a terminal can run it, the rail can hold it. One click opens the command in a new tab of the current space; a second click closes it. Add buttons through a small form, drag to reorder, right-click to delete. Icons match themselves from the command name — you never pick one.
 
 ![Rail button](preview.png)
 
