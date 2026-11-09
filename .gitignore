@@ -1,0 +1,2 @@
+# Written by the Herdr runtime into every mod folder; not source
+mods/*/gpui-kit.d.ts
