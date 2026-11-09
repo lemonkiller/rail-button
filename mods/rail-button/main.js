@@ -1,12 +1,12 @@
-// rail-button: a sidebar button rail. Click a button to run its bound command in a new tab, click again to close it.
-// Buttons are data (a command + a name); the + at the bottom adds one through a form, right-click a button to delete it.
+// rail-button: a sidebar button rail. Click a button to run its bound command in a new tab or a right-hand pane, click again to close it.
+// Buttons are data (a command + a name + an open mode); the + at the bottom adds one through a form, right-click a button for its settings.
 // Icons are matched automatically: first look for mods/rail-button/icons/<first word of command>.svg, then herdr's icons/<first word>.svg,
 // and fall back to a first-letter color block when neither exists. The user never picks an icon.
 //
-// Contract: a button owns at most one tab per space, and both open and close act only on the current space (2026-11-07 decision:
+// Contract: a button owns at most one tab or pane per space, and both open and close act only on the current space (2026-11-07 decision:
 // the old "unique across the whole net" contract would claim a tab from another space and close it, which is not what is expected). Two layers enforce this:
 // 1) Stable id: the button id is derived from the command (cmd_<first word>), so the shared record key stays stable and rebuilding the button never breaks the chain.
-//    Record shape: rail.tab.<id> = { [spaceId]: { folder, tabId, at, failedAt? } }, keyed per space.
+//    Record shape: rail.tab.<id> = { [spaceId]: { folder, tabId?, terminal?, mode?, at, failedAt? } }, keyed per space.
 // 2) Label claiming: after settle, tag the terminal with rail=<id> (stored in the core of the machine it runs on, queryable across the net).
 //    The local shared record is only a cache; when re-finding a tab only tabs in the current space count, and tabs in other spaces are never touched.
 // 3) Tabs with named=false (their name has degraded to a positional number) are renamed back to the program name by the display guard -- cross-machine snapshot
@@ -106,11 +106,12 @@ async function freeLayoutName(base) {
 const recKey = (id) => "rail.tab." + id;
 const firstWord = (cmd) => (String(cmd ?? "").trim().split(/\s+/)[0] ?? "");
 const stableId = (cmd) => "cmd_" + firstWord(cmd);
+const modeOf = (b) => (b?.mode === "pane" ? "pane" : "tab"); // a missing or unknown mode is a tab (pre-mode buttons)
 
 // Seed the original two buttons on first use; their icons are already copied into this mod's icons/
 const SEED = [
-  { id: "cmd_yazi", cmd: "yazi", title: "yazi" },
-  { id: "cmd_lazygit", cmd: "lazygit", title: "lazygit" },
+  { id: "cmd_yazi", cmd: "yazi", title: "yazi", mode: "tab" },
+  { id: "cmd_lazygit", cmd: "lazygit", title: "lazygit", mode: "tab" },
 ];
 
 function buttons() {
@@ -142,12 +143,14 @@ function tabOfTerminal(addr) {
   return panes().find((p) => p.terminal === addr)?.tab ?? null;
 }
 
-// Tag the terminal of a tab with the rail label. Remote calls go through hc exec --on and the core's built-in channel (does not depend on PATH);
+// tab id -> the terminal address of its first terminal pane
+const terminalOfTab = (tabId) => panes().find((p) => p.tab === tabId && p.terminal)?.terminal ?? null;
+
+// Tag a terminal (given by full address) with the rail label. Remote calls go through hc exec --on and the core's built-in channel (does not depend on PATH);
 // the address is stripped of its machine prefix because the target machine's hc only accepts bare local addresses. The receipt is written to tag.log for diagnostics.
-function tagTerminal(b, tabId, space) {
-  const pane = panes().find((p) => p.tab === tabId && p.terminal);
-  if (!pane?.terminal) return;
-  const addr = pane.terminal.split("/").pop();
+function tagTerminal(b, terminalAddr, space) {
+  if (!terminalAddr) return;
+  const addr = String(terminalAddr).split("/").pop();
   const machine = space?.machine;
   const args = machine ? ["exec", "--on", machine, "hc", "label", addr, "rail=" + b.id]
                        : ["label", addr, "rail=" + b.id];
@@ -163,17 +166,33 @@ function tagTerminal(b, tabId, space) {
   });
 }
 
-// A button's tab: three-step resolution, all scoped to the current space -- shared record -> label claim (restoring the record on the way) -> none
-// label claiming never searches the whole net: a same-labelled tab in another space counts as absent, otherwise clicking a button would claim and close another space's tab
-function ourTab(b, space) {
+// A button's target (a tab-mode tab, or a pane-mode terminal address): three-step resolution, all scoped to the current
+// space -- shared record -> label claim (restoring the record on the way) -> none
+// label claiming never searches the whole net: a same-labelled target in another space counts as absent, otherwise clicking a button would claim and close another space's tab or pane
+function ourTarget(b, space) {
   if (!space) return null;
   const key = recKey(b.id);
   const recs = shared(key) ?? {};
   const rec = recs[space.id];
   const tabs = space.tabs ?? [];
+  if (modeOf(b) === "pane") {
+    if (rec?.terminal) {
+      const pane = panes().find((p) => p.terminal === rec.terminal);
+      if (pane && tabs.some((t) => t.id === pane.tab)) return { mode: "pane", terminal: rec.terminal };
+    }
+    for (const t of railTerminals(b)) {
+      const pane = panes().find((p) => p.terminal === t.address);
+      if (!pane || !tabs.some((x) => x.id === pane.tab)) continue;
+      const next = Object.assign({}, recs);
+      next[space.id] = { folder: folderOf(space), mode: "pane", terminal: t.address, at: Date.now() };
+      setShared(key, next);
+      return { mode: "pane", terminal: t.address };
+    }
+    return null;
+  }
   if (rec?.tabId) {
     const hit = tabs.find((t) => t.id === rec.tabId);
-    if (hit) return hit;
+    if (hit) return { mode: "tab", tab: hit };
   }
   for (const t of railTerminals(b)) {
     const tabId = tabOfTerminal(t.address);
@@ -183,7 +202,7 @@ function ourTab(b, space) {
     const next = Object.assign({}, recs);
     next[space.id] = { folder: folderOf(space), tabId, at: Date.now() };
     setShared(key, next);
-    return hit;
+    return { mode: "tab", tab: hit };
   }
   return null;
 }
@@ -205,16 +224,33 @@ function pickMine(b, space, before) {
   return null;
 }
 
+// The pane-mode counterpart of pickMine: the new pane is identified, not guessed -- a terminal that did not exist
+// before the open call, whose argv contains the command's first word, living in a tab of this space.
+function pickMinePane(b, space, before) {
+  const w = firstWord(b.cmd).toLowerCase();
+  if (!w) return null;
+  const ownTabs = new Set((space?.tabs ?? []).map((t) => t.id));
+  for (const p of panes()) {
+    if (!p.terminal || before.has(p.terminal)) continue;
+    if (!ownTabs.has(p.tab)) continue;
+    const term = terminals().find((x) => x.address === p.terminal);
+    const haystack = ((term?.argv ?? []).join(" ") + " " + String(term?.name ?? "")).toLowerCase();
+    if (haystack.includes(w)) return p.terminal;
+  }
+  return null;
+}
+
 // Current state of a button (current space only: an opening/failed cooldown in another space must not block clicks here)
 function stateOf(b) {
   const space = activeSpace();
   const recs = space ? shared(recKey(b.id)) : null;
   const rec = recs ? recs[space.id] : null;
-  const tab = ourTab(b, space);
-  if (tab) return { kind: "open", tab, space };
-  if (rec?.tabId && Date.now() - (rec.at ?? 0) < 2000) return { kind: "opening", space }; // just opened, outcome unknown (the command may exit immediately)
+  const target = ourTarget(b, space);
+  if (target) return { kind: "open", target, space };
+  const settled = modeOf(b) === "pane" ? rec?.terminal : rec?.tabId;
+  if (settled && Date.now() - (rec.at ?? 0) < 2000) return { kind: "opening", space }; // just opened, outcome unknown (the command may exit immediately)
   if (rec?.failedAt && Date.now() - rec.failedAt < FAIL_COOL_MS) return { kind: "failed", space };
-  if (rec && !rec.tabId && Date.now() < (rec.at ?? 0) + BUSY_MS) return { kind: "opening", space };
+  if (rec && !settled && Date.now() < (rec.at ?? 0) + BUSY_MS) return { kind: "opening", space };
   return { kind: "closed", space };
 }
 
@@ -229,11 +265,11 @@ function letter(t, name) {
     .text_size(9.5).font_semibold().text_color(t.background).child(ch);
 }
 
-function button(t, id, text, primary, action) {
+function button(t, id, text, primary, action, color) {
   return h_flex().id(id).h(32).px(14).items_center().rounded(8)
     .border_1().border_color(primary ? t.solid : t.input)
     .bg(primary ? t.solid : t.raised)
-    .text_color(primary ? t.solid_foreground : t.foreground)
+    .text_color(color ?? (primary ? t.solid_foreground : t.foreground))
     .text_size(12.5).font_medium().cursor_pointer()
     .hover((s) => s.opacity(0.88)).on_click(action).child(text);
 }
@@ -247,12 +283,31 @@ export default class RailButton extends View {
     if (this.mode === "add") {
       this.cmd = "";
       this.name = "";
+      this.openIn = "tab"; // the "Open in" selector's choice; "tab" is the default
       this.cmdInput = InputState.new({ placeholder: "Command, for example lazygit or npm run dev" });
       this.nameInput = InputState.new({ placeholder: "Leave empty to use the command's first word" });
       this.cmdInput.on("change", (_e, cx) => { this.cmd = this.cmdInput.value(); cx.notify(); });
       this.nameInput.on("change", (_e, cx) => { this.name = this.nameInput.value(); cx.notify(); });
       this.cmdInput.on("submit", () => this.saveAdd());
       this.nameInput.on("submit", () => this.saveAdd());
+      this.handle = cx.focus_handle();
+      this.cmdInput.focus();
+      cx.timer.after(600, () => this.cmdInput.focus());
+      return;
+    }
+
+    if (this.mode === "edit") {
+      const b = buttons().find((x) => x.id === props()?.id);
+      this.cmd = b?.cmd ?? "";
+      this.name = b?.title ?? "";
+      this.openIn = modeOf(b);
+      this.saved = false;
+      this.cmdInput = InputState.new({ placeholder: "Command, for example lazygit or npm run dev", value: this.cmd });
+      this.nameInput = InputState.new({ placeholder: "Leave empty to use the command's first word", value: this.name });
+      this.cmdInput.on("change", (_e, cx) => { this.cmd = this.cmdInput.value(); cx.notify(); });
+      this.nameInput.on("change", (_e, cx) => { this.name = this.nameInput.value(); cx.notify(); });
+      this.cmdInput.on("submit", () => this.saveEdit());
+      this.nameInput.on("submit", () => this.saveEdit());
       this.handle = cx.focus_handle();
       this.cmdInput.focus();
       cx.timer.after(600, () => this.cmdInput.focus());
@@ -389,7 +444,7 @@ export default class RailButton extends View {
     }
     const title = String(this.name ?? "").trim() || firstWord(cmd);
     const list = buttons().slice();
-    list.push({ id: nid, cmd, title });
+    list.push({ id: nid, cmd, title, mode: this.openIn === "pane" ? "pane" : "tab" });
     setShared(KEY, list);
     closeOverlay(props().overlay);
   }
@@ -399,6 +454,54 @@ export default class RailButton extends View {
     setShared(KEY, list);
     setShared(recKey(id), null);
     closeOverlay(props().overlay);
+  }
+
+  // Kills every live instance a button's records still claim (each space's record names either a tab or a pane
+  // terminal) and drops the whole record key, so a changed command or mode never leaves a stale claim behind.
+  dropInstances(b) {
+    const recs = shared(recKey(b.id)) ?? {};
+    for (const rec of Object.values(recs)) {
+      if (rec?.tabId) run("tab.close", { id: rec.tabId, confirmed: true });
+      if (rec?.terminal) run("terminal.kill", { terminal: rec.terminal });
+    }
+    setShared(recKey(b.id), null);
+  }
+
+  saveEdit() {
+    if (this.saved) return; // Enter reaches both the input's submit and this form's key handler; save once
+    const p = props() ?? {};
+    const old = buttons().find((x) => x.id === p.id);
+    if (!old) { closeOverlay(p.overlay); return; }
+    const cmd = String(this.cmd ?? "").trim();
+    if (!cmd) return; // an empty command is not a valid button: keep the dialog open
+    const newId = stableId(cmd);
+    if (buttons().some((x) => x.id !== old.id && x.id === newId)) {
+      notify({ title: "A button for this command already exists", body: `${cmd} is already on the rail`, level: "warning", timeout: 4000 });
+      return;
+    }
+    const title = String(this.name ?? "").trim() || firstWord(cmd);
+    const mode = this.openIn === "pane" ? "pane" : "tab";
+    // A new command, id or mode invalidates the records under the old identity: kill its tabs/panes in every space first,
+    // even when only the arguments changed (yazi -> yazi --help keeps the id but the old instance runs the old command)
+    if (newId !== old.id || mode !== modeOf(old) || cmd !== old.cmd) {
+      this.dropInstances(old);
+      if (newId !== old.id) setShared(recKey(newId), null); // a leftover record of a long-deleted button must not be inherited
+    }
+    const list = buttons().slice();
+    const i = list.findIndex((x) => x.id === old.id);
+    if (i >= 0) list[i] = { id: newId, cmd, title, mode };
+    setShared(KEY, list);
+    this.saved = true;
+    closeOverlay(p.overlay);
+  }
+
+  // The "Open in" two-option selector shared by the add and edit forms; the chosen option gets the primary look
+  openInRow(t) {
+    const opt = (id, text, val) =>
+      button(t, id, text, this.openIn === val, (_e, cx) => { this.openIn = val; cx.notify(); });
+    return h_flex().gap(8)
+      .child(opt("rb-open-tab", "New tab", "tab"))
+      .child(opt("rb-open-pane", "Right pane", "pane"));
   }
 
   // Release: if it was dragged and has a different drop target -> reorder; otherwise treat it as a click that toggles the tab. State is cleared either way.
@@ -441,25 +544,39 @@ export default class RailButton extends View {
     const st = stateOf(b);
     if (st.kind === "opening" || st.kind === "failed") return; // opening or just failed: swallow the click
     if (!st.space) return;
-    if (st.kind === "open") this.closing(b, st.tab, st.space.id, cx);
+    if (st.kind === "open") this.closing(b, st.target, st.space.id, cx);
     else this.open(b, st.space, cx);
   }
 
-  closing(b, tab, spaceId, cx) {
-    // Keep the record for verification; a cross-machine close may fail silently, so retry up to 3 times starting at 600ms and clear the record only once the tab is confirmed gone
-    // Only this space's record key is cleared; if another space also has this button's tab open, its record is untouched
-    run("tab.close", { id: tab.id, confirmed: true });
+  closing(b, target, spaceId, cx) {
+    // Keep the record for verification; a cross-machine close may fail silently, so retry up to 3 times starting at 600ms and clear the record only once the target is confirmed gone
+    // Only this space's record key is cleared; if another space also has this button open, its record is untouched
+    const drop = () => {
+      const recs = Object.assign({}, shared(recKey(b.id)));
+      delete recs[spaceId];
+      setShared(recKey(b.id), recs);
+    };
+    if (target.mode === "pane") {
+      run("terminal.kill", { terminal: target.terminal });
+      const tryKill = (cx, n) => {
+        cx.timer.after(600 * n, (cx) => {
+          const still = panes().some((p) => p.terminal === target.terminal);
+          if (!still) { drop(); cx.notify(); return; }
+          if (n < 3) { run("terminal.kill", { terminal: target.terminal }); tryKill(cx, n + 1); return; }
+          drop();
+          notify({ title: "Close failed", body: `The pane for ${b.title} cannot be closed, please close it manually`, level: "error", timeout: 5000 });
+        });
+      };
+      tryKill(cx, 1);
+      return;
+    }
+    run("tab.close", { id: target.tab.id, confirmed: true });
     const tryClose = (cx, n) => {
       cx.timer.after(600 * n, (cx) => {
         const sp = spaces().find((s) => s.id === spaceId);
-        const still = (sp?.tabs ?? []).find((t) => t.id === tab.id);
-        const drop = () => {
-          const recs = Object.assign({}, shared(recKey(b.id)));
-          delete recs[spaceId];
-          setShared(recKey(b.id), recs);
-        };
+        const still = (sp?.tabs ?? []).find((t) => t.id === target.tab.id);
         if (!still) { drop(); cx.notify(); return; }
-        if (n < 3) { run("tab.close", { id: tab.id, confirmed: true }); tryClose(cx, n + 1); return; }
+        if (n < 3) { run("tab.close", { id: target.tab.id, confirmed: true }); tryClose(cx, n + 1); return; }
         drop();
         notify({ title: "Close failed", body: `The tab for ${b.title} cannot be closed, please close it manually`, level: "error", timeout: 5000 });
       });
@@ -474,6 +591,7 @@ export default class RailButton extends View {
     const argv = String(b.cmd).trim().split(/\s+/).filter(Boolean);
     if (!argv.length) return;
 
+    if (modeOf(b) === "pane") { this.openPane(b, space, cx, key, folder, argv); return; }
     const before = new Set((space.tabs ?? []).map((t) => t.id));
     // Claim the slot first: every later click sees opening and will not open another tab
     setShared(key, Object.assign({}, shared(key), { [space.id]: { folder, tabId: null, at: Date.now() } }));
@@ -482,7 +600,7 @@ export default class RailButton extends View {
     const settle = (tabId, cx) => {
       setShared(key, Object.assign({}, shared(key), { [space.id]: { folder, tabId, at: Date.now() } }));
       run("tab.rename", { id: tabId, name: b.title }); // tab.new's name can be lost across machines, set it once more
-      tagTerminal(b, tabId, space);                    // apply the rail label, the basis for claiming across the net
+      tagTerminal(b, terminalOfTab(tabId), space);        // apply the rail label, the basis for claiming across the net
       cx.notify();
       // 1.5s later: no tab = the command did not start; name clobbered = set it again
       cx.timer.after(GONE_MS, (cx) => {
@@ -499,7 +617,7 @@ export default class RailButton extends View {
         }
         if (tab.name !== b.title) { run("tab.rename", { id: tabId, name: b.title }); cx.notify(); }
         // Re-apply the label: on the fast path the pane often does not exist yet when settle runs, so the first tagging attempt is a no-op; the tab is stable now, so apply it again idempotently
-        tagTerminal(b, tabId, space);
+        tagTerminal(b, terminalOfTab(tabId), space);
       });
     };
 
@@ -521,6 +639,55 @@ export default class RailButton extends View {
     });
   }
 
+  // Pane-mode open: same contract as the tab path -- claim the slot first so a fast second click sees "opening",
+  // then identify (never guess) the pane the command created and tag its terminal for cross-net claiming.
+  openPane(b, space, cx, key, folder, argv) {
+    const before = new Set(panes().map((p) => p.terminal));
+    setShared(key, Object.assign({}, shared(key), { [space.id]: { folder, mode: "pane", at: Date.now() } }));
+    run("terminal.open", { argv, folder, place: "right" });
+
+    const settle = (addr, cx) => {
+      setShared(key, Object.assign({}, shared(key), { [space.id]: { folder, mode: "pane", terminal: addr, at: Date.now() } }));
+      tagTerminal(b, addr, space); // apply the rail label, the basis for claiming across the net
+      cx.notify();
+      // 1.5s later: no pane in this space = the command did not start
+      cx.timer.after(GONE_MS, (cx) => {
+        const recs = shared(key);
+        const rec = recs ? recs[space.id] : null;
+        if (rec?.terminal !== addr) return; // another action took over the state; do not report a false failure
+        const sp = spaces().find((s) => s.id === space.id);
+        const pane = panes().find((p) => p.terminal === addr);
+        const alive = Boolean(pane) && (sp?.tabs ?? []).some((t) => t.id === pane.tab);
+        if (!alive) {
+          setShared(key, Object.assign({}, shared(key), { [space.id]: { failedAt: Date.now() } }));
+          notify({ title: "Command did not start", body: `${b.cmd} exited immediately: it may not be installed, or it may be a shell built-in (such as dir)`, level: "error", timeout: 5000 });
+          cx.notify();
+          return;
+        }
+        // Re-apply the label: on the fast path the terminal may not be labelled yet when settle runs, so apply it again idempotently
+        tagTerminal(b, addr, space);
+      });
+    };
+
+    // Fast path: right after terminal.open returns the new pane is usually already in panes()
+    const hit = pickMinePane(b, spaces().find((s) => s.id === space.id), before);
+    if (hit) { settle(hit, cx); return; }
+
+    // Fallback: short polling; exit as soon as someone writes a terminal, never create a duplicate
+    cx.spawn(async (cx) => {
+      for (let i = 0; i < 40; i++) {
+        await new Promise((r) => cx.timer.after(80, r));
+        const recs = shared(key);
+        if (recs && recs[space.id] && recs[space.id].terminal) return;
+        const hit = pickMinePane(b, spaces().find((s) => s.id === space.id), before);
+        if (hit) { settle(hit, cx); return; }
+      }
+      setShared(key, Object.assign({}, shared(key), { [space.id]: { failedAt: Date.now() } }));
+      notify({ title: "Command did not start", body: `${b.cmd} exited immediately: it may not be installed, or it may be a shell built-in (such as dir)`, level: "error", timeout: 5000 });
+      cx.notify();
+    });
+  }
+
   // The sidebar body: a column of buttons with a + at the end
   rail(cx) {
     const t = theme();
@@ -534,9 +701,10 @@ export default class RailButton extends View {
     const row = (b) => {
       const recs = space ? shared(recKey(b.id)) : null;
       const rec = recs ? recs[space.id] : null;
-      const tab = ourTab(b, space);
-      const open = Boolean(tab);
-      const opening = !open && rec && !rec.tabId && Date.now() < (rec.at ?? 0) + BUSY_MS;
+      const target = ourTarget(b, space);
+      const open = Boolean(target);
+      const settled = modeOf(b) === "pane" ? rec?.terminal : rec?.tabId;
+      const opening = !open && rec && !settled && Date.now() < (rec.at ?? 0) + BUSY_MS;
       const failed = !open && Boolean(rec?.failedAt) && Date.now() - rec.failedAt < FAIL_COOL_MS;
       const path = this.icons[firstWord(b.cmd)];
       const i = list.findIndex((x) => x.id === b.id);
@@ -552,7 +720,7 @@ export default class RailButton extends View {
         .text_color(open ? t.accent : failed ? t.blocked : opening ? t.dim : t.muted)
         .when(open, (el) => el.bg(t.selected))
         .hover((s) => s.bg(t.hover).text_color(t.foreground))
-        .tooltip(b.title + (open ? ": click to close" : failed ? ": the command did not start, try again later or right-click to delete" : opening ? ": opening..." : ": click to open, hold and drag to reorder, right-click to delete"))
+        .tooltip(b.title + (open ? ": click to close" : failed ? ": the command did not start, try again later or right-click for settings" : opening ? ": opening..." : ": click to open, hold and drag to reorder, right-click for settings"))
         .on_mouse_down("left", (e, cx) => {
           cx.stop_propagation();
           this.pressed = b.id;
@@ -576,7 +744,7 @@ export default class RailButton extends View {
           this.pressed = null;
           this.over = null;
           this.dragMoved = false;
-          openOverlay({ mod: "rail-button", kind: "dialog", width: 360, props: { mode: "remove", id: b.id } });
+          openOverlay({ mod: "rail-button", kind: "dialog", width: 380, props: { mode: "edit", id: b.id } });
         })
         .child(path ? svg(path).size(16) : letter(t, b.title));
     };
@@ -690,9 +858,42 @@ export default class RailButton extends View {
       .child(label("Name"))
       .child(field(this.nameInput))
       .child(div().pt(6).text_size(11.5).text_color(t.dim).child("Leave empty to use the command's first word. The icon is matched automatically from the command name."))
+      .child(label("Open in"))
+      .child(this.openInRow(t))
       .child(h_flex().pt(20).gap(8).justify_end()
         .child(button(t, "rb-cancel", "Cancel", false, () => closeOverlay(p.overlay)))
         .child(button(t, "rb-save", "Add", true, () => this.saveAdd())));
+  }
+
+  editForm() {
+    const t = theme();
+    const p = props() ?? {};
+    const b = buttons().find((x) => x.id === p.id);
+    const label = (text) => div().pt(14).pb(6).text_size(11.5).text_color(t.dim).child(text);
+    const field = (state) => Input.new(state).h(36).px(10).rounded(9)
+      .border_1().border_color(t.input).bg(t.background)
+      .text_size(12.8).text_color(t.foreground);
+    return v_flex().id("rb-edit-form").track_focus(this.handle)
+      .on_key_down((e, cx) => {
+        if (e.key === "escape") { closeOverlay(p.overlay); cx.stop_propagation(); }
+        else if (e.key === "enter") { this.saveEdit(); cx.stop_propagation(); }
+      })
+      .w_full().min_h(0).p(18).bg(t.popover).text_color(t.foreground)
+      .child(h_flex().items_center()
+        .child(div().flex_1().text_size(15).font_semibold().child("Button settings"))
+        .child(div().text_size(11).text_color(t.dim).child("Esc")))
+      .child(label("Command"))
+      .child(field(this.cmdInput))
+      .child(label("Name"))
+      .child(field(this.nameInput))
+      .child(label("Open in"))
+      .child(this.openInRow(t))
+      .child(h_flex().pt(20).items_center()
+        .child(button(t, "rb-del", "Delete", false, () => (b ? this.doRemove(p.id) : closeOverlay(p.overlay)), t.blocked))
+        .child(div().flex_1())
+        .child(h_flex().gap(8)
+          .child(button(t, "rb-cancel", "Cancel", false, () => closeOverlay(p.overlay)))
+          .child(button(t, "rb-save", "Save", true, () => this.saveEdit()))));
   }
 
   removeForm() {
@@ -716,6 +917,7 @@ export default class RailButton extends View {
 
   render(cx) {
     if (this.mode === "add") return this.addForm();
+    if (this.mode === "edit") return this.editForm();
     if (this.mode === "remove") return this.removeForm();
     return this.rail(cx);
   }

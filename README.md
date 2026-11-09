@@ -2,7 +2,7 @@ English | [简体中文](README.zh-CN.md)
 
 # RailButton
 
-Rail button turns any terminal command into a button in your Herdr window: yazi, lazygit, btop, k9s, a one-line file server, your own scripts — if a terminal can run it, the rail can hold it. One click opens the command in a new tab of the current space; a second click closes it. Add buttons through a small form, drag to reorder, right-click to delete. Icons match themselves from the command name — you never pick one.
+Rail button turns any terminal command into a button in your Herdr window: yazi, lazygit, btop, k9s, a one-line file server, your own scripts — if a terminal can run it, the rail can hold it. One click opens the command in a new tab of the current space, or in a pane to the right — your choice per button; a second click closes it. Add buttons through a small form, drag to reorder, right-click one for its settings. Icons match themselves from the command name — you never pick one.
 
 ![Rail button](preview.png)
 
@@ -17,13 +17,13 @@ The mod is `place: none`: it draws only where a layout puts it, so your layout n
 ## What it does
 
 - A column of 30px icon buttons in a 44px sidebar, plus a `+` button at the bottom. Tooltips replace labels.
-- Click a button: the command opens in a new tab of the current space, named after the button. Click again: the tab closes. Each button keeps at most one tab per space — spaces stay independent.
+- Click a button: the command opens in a new tab of the current space (named after the button), or in a pane split off the right of the focused pane — the button's `Open in` setting picks which. Click again: that tab or pane closes. Each button keeps at most one instance per space — spaces stay independent.
 - Tabs are found again across machines: the terminal gets a `rail=<id>` label (applied through `hc exec --on` on the remote), so a button re-attaches to its tab even after a restart or on another machine of your setup.
-- Drag to reorder (movement past 4px counts as a drag; an accent line marks the drop edge). Right-click a button for a delete confirmation dialog.
-- The `+` button opens an add form: type a command, optionally a name, done. Duplicate commands are rejected; the button's stable id is derived from the command's first word.
+- Drag to reorder (movement past 4px counts as a drag; an accent line marks the drop edge). Right-click a button for its settings: command, name, `Open in` (new tab or right pane) and a Delete button. Changing the command or the open mode closes the instance the button still claims, so no orphan tab or pane is left behind.
+- The `+` button opens an add form: type a command, optionally a name, pick `Open in`, done. Duplicate commands are rejected; the button's stable id is derived from the command's first word.
 - Icons resolve in three steps: `icons/<first word>.svg` shipped in this mod, then Herdr's own icon library, then a colored first-letter tile — the same command always gets the same color.
 - Ships with two buttons seeded: **yazi** (terminal file manager) and **lazygit** (git TUI).
-- Failure path: if a command exits immediately (not installed, or a shell built-in like `dir`), the button shows a failure state with a notification after 1.5 seconds and cools down for 2 seconds — no dead tab is left behind.
+- Failure path: if a command exits immediately (not installed, or a shell built-in like `dir`), the button shows a failure state with a notification after 1.5 seconds and cools down for 2 seconds — no dead tab or pane is left behind.
 - Name guard: tabs whose name degrades to a bare number (a cross-machine snapshot clobber) are renamed back to the program name within 5 seconds. Tabs you named yourself are never touched.
 
 ## Requirements
