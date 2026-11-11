@@ -25,8 +25,9 @@ Or hand it to the agent in your Herdr window, which installs the mod and puts th
 - A column of 30px icon buttons in a 44px sidebar, plus a `+` button at the bottom. Tooltips replace labels.
 - Click a button: the command opens in a new tab of the current space (named after the button), or in a pane split off the right of the focused pane — the button's `Open in` setting picks which. Click again: that tab or pane closes. Each button keeps at most one instance per space — spaces stay independent.
 - Tabs are found again across machines: the terminal gets a `rail=<id>` label (applied through `hc exec --on` on the remote), so a button re-attaches to its tab even after a restart or on another machine of your setup.
-- Drag to reorder (movement past 4px counts as a drag; an accent line marks the drop edge). Right-click a button for its settings: command, name, `Open in` (new tab or right pane) and a Delete button. Changing the command or the open mode closes the instance the button still claims, so no orphan tab or pane is left behind.
-- The `+` button opens an add form: type a command, optionally a name, pick `Open in`, done. Duplicate commands are rejected; the button's stable id is derived from the command's first word.
+- Restore on start: tick **Restore on start** in a button's settings and Herdr, when it starts, types the command back into the tab or pane that button owns if that terminal is sitting at a shell again (a reboot, a logout, a core restart). The tab, pane, address, folder and label are kept, so nothing is opened, renamed or closed; a tab or pane you closed yourself is not resurrected. The rail runs only while its block is in the layout Herdr shows, so the sweep happens the first time the rail appears after a start: keep the rail in that layout for it to fire on its own.
+- Drag to reorder (movement past 4px counts as a drag; an accent line marks the drop edge). Right-click a button for its settings: command, name, `Open in` (new tab or right pane), `Restore on start` and a Delete button. Changing the command or the open mode closes the instance the button still claims, so no orphan tab or pane is left behind.
+- The `+` button opens an add form: type a command, optionally a name, pick `Open in`, tick `Restore on start` if you want it back after a restart, done. Duplicate commands are rejected; the button's stable id is derived from the command's first word.
 - Icons resolve in three steps: `icons/<first word>.svg` shipped in this mod, then Herdr's own icon library, then a colored first-letter tile — the same command always gets the same color.
 - Ships with two buttons seeded: **yazi** (terminal file manager) and **lazygit** (git TUI).
 - Failure path: if a command exits immediately (not installed, or a shell built-in like `dir`), the button shows a failure state with a notification after 1.5 seconds and cools down for 2 seconds — no dead tab or pane is left behind.
@@ -81,7 +82,7 @@ Any executable, any one-line command, any script with a shebang works. A few thi
 
 - `mods/rail-button/main.js` — the rail: buttons, tabs, drag-reorder, dialogs, guards.
 - `mods/rail-button/mod.json` — `place: none`.
-- `mods/rail-button/icons/yazi.svg`, `icons/lazygit.svg` — icons for the seeded buttons.
+- `mods/rail-button/icons/yazi.svg`, `icons/lazygit.svg` — icons for the seeded buttons; `icons/tick.svg` — the restore checkbox's tick.
 - `RECIPE.md` — the full build brief in the official six-section format.
 - `preview.png` — the listing screenshot.
 

@@ -25,8 +25,9 @@ Rail button 把任意终端命令变成 Herdr 窗口里的一个按钮：yazi、
 - 44px 侧栏里一列 30px 图标按钮，底部一个 `+` 按钮。说明全靠 tooltip，不占空间。
 - 点按钮：命令在当前空间开一个新 tab（tab 名就是按钮名），或者 split 出聚焦 pane 右侧的一个新 pane——由按钮的 `Open in` 设置决定。再点：关闭那个 tab 或 pane。每个按钮在单个空间最多持有一个实例——各空间互不干扰。
 - 跨机找回实例：终端会被打上 `rail=<id>` 标签，所以重启之后、或者换你配置里的另一台机器，按钮都能重新认领自己的 tab 或 pane（pane 模式要求该 pane 在本地机的空间里）。
-- 拖动排序（位移超过 4px 才算拖动；落点边缘画一条强调线）。右键按钮打开设置框：命令、名字、`Open in`（新 tab / 右侧 pane）以及一个删除按钮。改命令或改打开方式时，按钮仍认领着的旧实例会先被关掉，不会留下孤儿 tab 或 pane。
-- `+` 按钮打开添加表单：填一条命令，名字可选，选一下 `Open in`，完事。重复的命令会被拒绝；按钮的稳定 id 由命令第一个单词派生。
+- 启动自动恢复：在按钮设置里勾上 **Restore on start**，Herdr 每次启动时，如果这个按钮认领的 tab 或 pane 还在、而里面的程序没了（重启机器、注销、核心重启之后核心用同目录补一个 shell），就把命令原文打回那个终端。tab、pane、地址、目录、标签都不变，不新建、不改名、不关闭；你自己关掉的 tab 或 pane 不会被复活。rail 只在自己的 block 出现在布局里时才运行，所以扫描发生在启动后 rail 第一次出现的时候：要把 rail 留在开机显示的布局里，它才会自己触发。
+- 拖动排序（位移超过 4px 才算拖动；落点边缘画一条强调线）。右键按钮打开设置框：命令、名字、`Open in`（新 tab / 右侧 pane）、`Restore on start` 以及一个删除按钮。改命令或改打开方式时，按钮仍认领着的旧实例会先被关掉，不会留下孤儿 tab 或 pane。
+- `+` 按钮打开添加表单：填一条命令，名字可选，选一下 `Open in`，需要开机恢复就勾上 `Restore on start`，完事。重复的命令会被拒绝；按钮的稳定 id 由命令第一个单词派生。
 - 图标按三级顺序解析：本 mod 自带的 `icons/<命令首词>.svg` → Herdr 内置图标库 → 首字母色块（同一个命令永远同一种颜色）。
 - 预置两个按钮：**yazi**（终端文件管理器）和 **lazygit**（git TUI）。
 - 失败处理：命令立即退出（没安装，或是 `dir` 这类 shell 内建命令）时，1.5 秒后按钮进入失败状态并弹通知，冷却 2 秒——不会留下一个死 tab 或 pane。
@@ -81,7 +82,7 @@ Rail button 把任意终端命令变成 Herdr 窗口里的一个按钮：yazi、
 
 - `mods/rail-button/main.js` — 本体：按钮、tab/pane 实例管理、拖动排序、对话框、守护。
 - `mods/rail-button/mod.json` — `place: none`。
-- `mods/rail-button/icons/yazi.svg`、`icons/lazygit.svg` — 预置按钮的图标。
+- `mods/rail-button/icons/yazi.svg`、`icons/lazygit.svg` — 预置按钮的图标；`icons/tick.svg` — 恢复勾选框的勾。
 - `RECIPE.md` — 官方六段格式的完整构建说明书。
 - `preview.png` — 收录页截图。
 

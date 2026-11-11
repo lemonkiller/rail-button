@@ -26,6 +26,18 @@ const GONE_MS = 1500;    // after opening, wait this long before checking whethe
 const COOL_MS = 600;     // cooldown after closing, blocks "close and immediately reopen"
 const DRAG_PX = 4;       // moving more than this many pixels while pressed counts as a drag, otherwise as a click (stops shaky hands from reordering)
 const FAIL_COOL_MS = 2000; // cooldown after a confirmed failure, so clicking repeatedly shows the notification only once
+// ---- Restore on start: a reboot, a logout or a core restart takes programs away. The core brings
+// each terminal back in place (same address, labels and folder) sitting at a shell, and never runs the
+// original command again. A button marked "restore" types its command into that shell when Herdr
+// starts, so the tab or pane comes back to life; nothing is created, moved or closed.
+const RESTORE_KEY = "rail.restore.at";
+const RESTORE_COOLDOWN_MS = 60000; // one sweep per Herdr start: a reload or a layout switch in the same run does not sweep again
+
+// Worth typing into: a pane whose foreground is an idle shell. A pane running another program is
+// somebody's work and is never typed into. Herdr's own spaces sidebar decides "busy" the same way.
+function shouldRestore(pane) {
+  return Boolean(pane) && pane.program?.shell === true;
+}
 
 // ---- Layout fit: the rail is place:"none", so it only draws where a layout gives it a block.
 // Two entry points keep that from being a trap:
@@ -107,6 +119,19 @@ const recKey = (id) => "rail.tab." + id;
 const firstWord = (cmd) => (String(cmd ?? "").trim().split(/\s+/)[0] ?? "");
 const stableId = (cmd) => "cmd_" + firstWord(cmd);
 const modeOf = (b) => (b?.mode === "pane" ? "pane" : "tab"); // a missing or unknown mode is a tab (pre-mode buttons)
+
+// This space's record for a button, or null
+const recordOf = (b, space) => {
+  const recs = shared(recKey(b.id));
+  return (recs ? recs[space ? space.id : ""] : null) ?? null;
+};
+
+// A settled target (a tab id or a pane terminal) means the button had a live instance the last time it
+// was seen; used by the restore sweep to tell "not back yet" from "closed on purpose"
+const hasRecord = (b, space) => {
+  const rec = recordOf(b, space);
+  return Boolean(rec && (rec.tabId || rec.terminal));
+};
 
 // Seed the original two buttons on first use; their icons are already copied into this mod's icons/
 const SEED = [
@@ -284,6 +309,7 @@ export default class RailButton extends View {
       this.cmd = "";
       this.name = "";
       this.openIn = "tab"; // the "Open in" selector's choice; "tab" is the default
+      this.restore = false;
       this.cmdInput = InputState.new({ placeholder: "Command, for example lazygit or npm run dev" });
       this.nameInput = InputState.new({ placeholder: "Leave empty to use the command's first word" });
       this.cmdInput.on("change", (_e, cx) => { this.cmd = this.cmdInput.value(); cx.notify(); });
@@ -301,6 +327,7 @@ export default class RailButton extends View {
       this.cmd = b?.cmd ?? "";
       this.name = b?.title ?? "";
       this.openIn = modeOf(b);
+      this.restore = Boolean(b?.restore);
       this.saved = false;
       this.cmdInput = InputState.new({ placeholder: "Command, for example lazygit or npm run dev", value: this.cmd });
       this.nameInput = InputState.new({ placeholder: "Leave empty to use the command's first word", value: this.name });
@@ -330,6 +357,7 @@ export default class RailButton extends View {
     this.pressPos = null;
     cx.spawn(async (cx) => this.loadIcons(cx));
     this.watch(cx);
+    this.sweepRestore(cx);
   }
 
   // Migrate buttons and records with old random ids to stable ids; migrate old single-record entries (with a spaceId field) to per-space keys (both one-shot and idempotent)
@@ -433,6 +461,104 @@ export default class RailButton extends View {
     });
   }
 
+  // The sweep: once after Herdr starts, for every space, a button marked restore whose terminal is
+  // still there and sitting at a shell gets its command typed back in. A tab or pane that is gone,
+  // a terminal running another program and an unreachable machine are left exactly as they are --
+  // nothing is resurrected that was closed on purpose. The 60-second cooldown keeps a mod reload or
+  // a layout switch from sweeping again.
+  sweepRestore(cx) {
+    cx.spawn(async (cx) => {
+      const last = shared(RESTORE_KEY);
+      if (typeof last === "number" && Date.now() - last < RESTORE_COOLDOWN_MS) return;
+      setShared(RESTORE_KEY, Date.now());
+      // The core brings terminals back over a moment after a start: wait for spaces, then keep waiting
+      // while a marked button still has a record for a space but its pane is not visible yet, so a
+      // half-restored view is not mistaken for "the pane is gone". Bounded, because a stale record
+      // must not hold the sweep forever.
+      for (let i = 0; i < 25 && spaces().length === 0; i++) {
+        await new Promise((r) => cx.timer.after(200, r));
+      }
+      for (let i = 0; i < 15; i++) {
+        const pending = spaces().some((space) =>
+          buttons().some((b) => b.restore && hasRecord(b, space) && !this.recordedPane(b, space)));
+        if (!pending) break;
+        await new Promise((r) => cx.timer.after(400, r));
+      }
+      const jobs = [];
+      for (const space of spaces()) {
+        for (const b of buttons()) {
+          if (!b.restore) continue;
+          const pane = this.recordedPane(b, space);
+          if (shouldRestore(pane)) jobs.push({ b, space, pane });
+        }
+      }
+      if (!jobs.length) return;
+      const failed = [];
+      for (const job of jobs) {
+        if (!(await this.typeBack(job, cx))) failed.push(job.b.title);
+        await new Promise((r) => cx.timer.after(300, r));
+      }
+      if (failed.length) {
+        notify({
+          title: "Restore on start",
+          body: failed.join(", ") + ": the command could not be typed back into its terminal",
+          level: "warning",
+          timeout: 6000,
+        });
+      }
+      cx.notify();
+    });
+  }
+
+  // The pane a restore button owns in a space, read from its record only: the sweep runs for every space,
+  // and the label-claim write a click does would put the focused space's folder into another space's
+  // record. Null when the record is missing or the tab or pane is gone.
+  recordedPane(b, space) {
+    const rec = recordOf(b, space);
+    if (!rec) return null;
+    const addr = modeOf(b) === "pane" ? rec.terminal : rec.tabId ? terminalOfTab(rec.tabId) : null;
+    if (!addr) return null;
+    return panes().find((p) => p.terminal === addr) ?? null;
+  }
+
+  // Type the command into the shell that replaced the lost program, then check that the foreground is
+  // no longer a shell. A receipt per attempt goes to restore.log, the way labeling writes tag.log
+  async typeBack(job, cx) {
+    const b = job.b;
+    const local = String(job.pane.terminal).split("/").pop();
+    const target = job.space.machine ? job.space.machine + "/" + local : local;
+    // A remote space goes through its own core the way labeling does: the target machine's hc takes the
+    // bare local address
+    const args = job.space.machine
+      ? ["exec", "--on", job.space.machine, "hc", "send", local, String(b.cmd).trim()]
+      : ["send", local, String(b.cmd).trim()];
+    let code = -1;
+    let err = "";
+    try {
+      const r = await hc(args);
+      code = r.code;
+      err = String(r.stderr ?? "").replace(/\s+/g, " ").slice(0, 120);
+    } catch (e) {
+      err = String(e).replace(/\s+/g, " ").slice(0, 120);
+    }
+    if (code !== 0) {
+      await this.receipt("restore=" + b.id + " space=" + job.space.id + " addr=" + target + " step=send code=" + code + " err=" + err);
+      return false;
+    }
+    await new Promise((r) => cx.timer.after(2500, r));
+    const after = panes().find((p) => p.terminal === job.pane.terminal);
+    const shell = after ? after.program?.shell === true : null;
+    await this.receipt("restore=" + b.id + " space=" + job.space.id + " addr=" + target + " step=settle shell=" + shell);
+    return shell === false;
+  }
+
+  async receipt(line) {
+    const home = appHome().replace(/\\/g, "/");
+    const path = home + "/mods/rail-button/restore.log";
+    const old = (await readTextFile(path).catch(() => null)) ?? "";
+    await writeTextFile(path, old + Date.now() + " " + line + "\n", old).catch(() => null);
+  }
+
   saveAdd() {
     const cmd = String(this.cmd ?? "").trim();
     if (!cmd) return;
@@ -444,7 +570,7 @@ export default class RailButton extends View {
     }
     const title = String(this.name ?? "").trim() || firstWord(cmd);
     const list = buttons().slice();
-    list.push({ id: nid, cmd, title, mode: this.openIn === "pane" ? "pane" : "tab" });
+    list.push({ id: nid, cmd, title, mode: this.openIn === "pane" ? "pane" : "tab", restore: Boolean(this.restore) });
     setShared(KEY, list);
     closeOverlay(props().overlay);
   }
@@ -489,7 +615,7 @@ export default class RailButton extends View {
     }
     const list = buttons().slice();
     const i = list.findIndex((x) => x.id === old.id);
-    if (i >= 0) list[i] = { id: newId, cmd, title, mode };
+    if (i >= 0) list[i] = { id: newId, cmd, title, mode, restore: Boolean(this.restore) };
     setShared(KEY, list);
     this.saved = true;
     closeOverlay(p.overlay);
@@ -502,6 +628,22 @@ export default class RailButton extends View {
     return h_flex().gap(8)
       .child(opt("rb-open-tab", "New tab", "tab"))
       .child(opt("rb-open-pane", "Right pane", "pane"));
+  }
+
+  // The "Restore on start" checkbox: a drawn box and tick on a clickable row, the way the "Open in"
+  // options are plain elements. The role and the checked state carry it to a screen reader.
+  restoreRow(t) {
+    const mark = this.restore
+      ? h_flex().size(14).flex_none().items_center().justify_center().rounded(3).bg(t.accent)
+          .child(svg("mods/rail-button/icons/tick.svg").size(10).text_color(t.accent_foreground))
+      : div().size(14).flex_none().rounded(3).border_1().border_color(t.input).bg(t.background);
+    return v_flex().pt(14).gap(6)
+      .child(h_flex().id("rb-restore-row").role("check_box").checked(Boolean(this.restore))
+        .gap(8).items_center().cursor_pointer()
+        .on_click((_e, cx) => { this.restore = !this.restore; cx.notify(); })
+        .child(mark)
+        .child(div().text_size(12.5).text_color(t.foreground).child("Restore on start")))
+      .child(div().text_size(11.5).text_color(t.dim).child("When Herdr starts and the program in this button's tab or pane is gone, type the command back into it."));
   }
 
   // Release: if it was dragged and has a different drop target -> reorder; otherwise treat it as a click that toggles the tab. State is cleared either way.
@@ -860,6 +1002,7 @@ export default class RailButton extends View {
       .child(div().pt(6).text_size(11.5).text_color(t.dim).child("Leave empty to use the command's first word. The icon is matched automatically from the command name."))
       .child(label("Open in"))
       .child(this.openInRow(t))
+      .child(this.restoreRow(t))
       .child(h_flex().pt(20).gap(8).justify_end()
         .child(button(t, "rb-cancel", "Cancel", false, () => closeOverlay(p.overlay)))
         .child(button(t, "rb-save", "Add", true, () => this.saveAdd())));
@@ -888,6 +1031,7 @@ export default class RailButton extends View {
       .child(field(this.nameInput))
       .child(label("Open in"))
       .child(this.openInRow(t))
+      .child(this.restoreRow(t))
       .child(h_flex().pt(20).items_center()
         .child(button(t, "rb-del", "Delete", false, () => (b ? this.doRemove(p.id) : closeOverlay(p.overlay)), t.blocked))
         .child(div().flex_1())
