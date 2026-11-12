@@ -10,15 +10,13 @@ Rail button 把任意终端命令变成 Herdr 窗口里的一个按钮：yazi、
 
 对 Herdr 窗口里的 agent 说一句话，装 mod 和布点一次完成：
 
-> Read `~/.config/herdr-app/AGENTS.md`, then add this mod: https://github.com/lemonkiller/rail-button — and add a 44px column with a rail-button block to my current layout (the shape is in the mod README's Requirements).
+> Read `~/.config/herdr-app/AGENTS.md`, then add this mod: https://github.com/lemonkiller/rail-button — and add a 44px column with a rail-button block to my current layout, as the last child of the row that holds the tab block (the shape is in the mod README's Requirements).
 
-这个 mod 是 `place: none`，只画在布局给它安排的位置——但它能把自己装进你**当前正在看的**任何布局，不用手改 JSON：
+这个 mod 是 `place: none`：布局不给出 block 就没有任何副本在跑。所以安装是两步——把 `mods/rail-button/` 拷进 `~/.config/herdr-app/mods/`，再把 44px 的列写进一个布局，位置是托着 tab 块那一行的最后一个子节点，落在窗口最右侧。没有要绑的键，也没有要关的弹窗。
 
-- 只需在 `keys.json` 里绑一次键：`"global": { "ctrl-shift-r": "mod.open:rail-button" }`。
-- 按它：rail 以一条浮动窄条的形式出现在任何布局里。如果当前布局没有 rail，窄条顶部会多出一个 **Fit** 方块——点一下，44px 的列就被写进你正在看的那个布局、紧挨着 tab 块右侧。
-- Herdr 自带的布局（`main`、`terminals`、`win98`）每次启动都会被还原，所以对它们 Fit 会**另存**一份「当前布局 + rail」的个人布局（`main-rail`）并切过去。
+Herdr 自带的布局（`main`、`terminals`、`win98`）每次启动都会被还原，所以列要落在个人布局里：把当前显示的树加上这根列写到新名字下（`main-rail`），再切过去。Herdr 会立刻重载布局文件，且不动 `layouts/.state/` 里的点击状态；`layout.set` 会丢掉那部分状态，所以只写文件。
 
-它写出来的 node 形状见[安装要求](#安装要求)，精确树见 [RECIPE.md](RECIPE.md)。
+node 形状见[安装要求](#安装要求)，精确树见 [RECIPE.md](RECIPE.md)。
 
 ## 功能一览
 
@@ -36,7 +34,7 @@ Rail button 把任意终端命令变成 Herdr 窗口里的一个按钮：yazi、
 ## 安装要求
 
 - Herdr 桌面应用。
-- 布局里要有一根窄列，内含引用该 mod 的 block。没有它 mod 能加载但没有地方画。开发时用的形状：
+- 布局里要有一根窄列，内含引用该 mod 的 block，位置是托着 tab 块那一行的最后一个子节点，这样 rail 贴在窗口最右侧。没有它 mod 能加载但没有地方画。开发时用的形状：
 
 ```json
 {

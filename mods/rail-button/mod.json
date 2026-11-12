@@ -1,5 +1,4 @@
 {
   "place": "none",
-  "title": "RailButton",
-  "overlay": { "kind": "window", "width": 60, "height": 520 }
+  "title": "RailButton"
 }

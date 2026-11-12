@@ -15,7 +15,7 @@ import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
 import {
   run, theme, shared, setShared, spaces, panes, terminals, focused, appHome, hc,
-  props, openOverlay, closeOverlay, readTextFile, writeTextFile, notify, layout,
+  props, openOverlay, closeOverlay, readTextFile, writeTextFile, notify,
 } from "herdr";
 
 const KEY = "rail.buttons";
@@ -39,81 +39,13 @@ function shouldRestore(pane) {
   return Boolean(pane) && pane.program?.shell === true;
 }
 
-// ---- Layout fit: the rail is place:"none", so it only draws where a layout gives it a block.
-// Two entry points keep that from being a trap:
-//   1) mod.json's overlay: `mod.open rail-button` (or a key bound to it) shows the rail anywhere,
-//      and that floating copy offers "add me to this layout".
-//   2) Fitting writes layouts/<name>.json, which Herdr hot-reloads: the click state in
-//      layouts/.state/ is untouched, unlike layout.set, which drops it.
-// Herdr's own layouts are read-only (replaced on every start), so there the fit saves the shown
-// tree plus the rail as a personal layout and switches to it.
-const RAIL_COL = {
-  id: "rail-tools",
-  type: "column",
-  children: [{ id: "rail", type: "block", content: { mod: "rail-button" } }],
-  size: { px: 44 },
-  min: 44,
-  max: 44,
-  padding: [8, 0],
-  background: "chrome",
-  border: { width: 1, color: "border" },
-  radius: 10,
-  resizable: false,
-};
-
-const BS = String.fromCharCode(92);
-const homePath = () => appHome().split(BS).join("/");
-const hasRail = (tree) => JSON.stringify(tree ?? {}).includes('"mod":"rail-button"') || JSON.stringify(tree ?? {}).includes('"mod": "rail-button"');
-
-// The node a rail belongs beside: the block showing the active tab (main/work-body in the shipped
-// shapes). Falls back to the root when a layout has no such block (Herdr 98 is one whole mod).
-function findTabNode(node, parent) {
-  if (!node || typeof node !== "object") return null;
-  const c = node.content;
-  if (c && typeof c.tab === "string") return { node, parent };
-  for (const ch of node.children ?? []) {
-    const hit = findTabNode(ch, node);
-    if (hit) return hit;
-  }
-  return null;
-}
-
-// A copy of the tree with a 44px rail column next to the tab block
-function withRail(tree) {
-  const t = JSON.parse(JSON.stringify(tree ?? {}));
-  if (hasRail(t)) return t; // idempotent: a layout that already has the rail is left exactly as it is
-  const col = () => JSON.parse(JSON.stringify(RAIL_COL));
-  const hit = findTabNode(t, null);
-  if (hit && hit.parent && Array.isArray(hit.parent.children)) {
-    const i = hit.parent.children.indexOf(hit.node);
-    hit.parent.children.splice(i + 1, 0, col());
-    return t;
-  }
-  if (Array.isArray(t.children)) { t.children.push(col()); return t; }
-  return { id: "root", type: "row", children: [t, col()] };
-}
-
-// installed.json carries a "layout:<name>" hash for every layout Herdr ships itself
-async function isShippedLayout(name) {
-  const raw = await readTextFile(homePath() + "/installed.json").catch(() => null);
-  if (!raw) return false;
-  try { return Object.prototype.hasOwnProperty.call(JSON.parse(raw), "layout:" + name); } catch { return false; }
-}
-
-async function writeLayoutFile(name, tree, expected) {
-  const text = JSON.stringify(tree, null, 2) + "\n";
-  await writeTextFile(homePath() + "/layouts/" + name + ".json", text, expected ?? null);
-}
-
-// First free name for a personal layout derived from `base`
-async function freeLayoutName(base) {
-  for (let i = 1; i < 100; i++) {
-    const name = i === 1 ? base : base + "-" + i;
-    const taken = await readTextFile(homePath() + "/layouts/" + name + ".json").catch(() => null);
-    if (!taken) return name;
-  }
-  return base + "-" + Date.now();
-}
+// ---- Placement: mod.json is place:"none", so the rail draws only where a layout gives it a block,
+// and nothing runs in a layout that does not. Installing the mod therefore includes writing that
+// block (README's install step, the column shape below). It is not done from here: a mod that is not
+// in the layout has no copy to run, and a copy that writes its own block has to be summoned with an
+// overlay first -- one more step and one more surface to close.
+//   The shape the installer writes, in px: a 44 wide, non-resizable column, padding [8, 0],
+//   background "chrome", a 1px "border" border, radius 10, holding one block for this mod.
 
 const recKey = (id) => "rail.tab." + id;
 const firstWord = (cmd) => (String(cmd ?? "").trim().split(/\s+/)[0] ?? "");
@@ -899,22 +831,6 @@ export default class RailButton extends View {
       .on_click(() => openOverlay({ mod: "rail-button", kind: "dialog", width: 420, props: { mode: "add" } }))
       .child(svg("mods/workspace-chrome/plus.svg").size(14));
 
-    // A floating copy (opened with mod.open) is the rail's way in from a layout that has no block
-    // for it: it offers to fit itself into that layout instead of being a popup the person closes.
-    const floating = Boolean(props()?.overlay);
-    const missing = floating && !hasRail(layout());
-
-    const fit = missing
-      ? h_flex().id("rb-fit").h(26).px(8).flex_none().items_center().justify_center().rounded(7)
-          .bg(t.solid).text_color(t.solid_foreground)
-          .text_size(10.5).font_semibold().cursor_pointer()
-          .hover((s) => s.opacity(0.88))
-          .tooltip("Add the rail to this layout")
-          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-          .on_click((_e, cx) => this.fit(cx))
-          .child("Fit")
-      : null;
-
     return v_flex().size_full().items_center().pt(6).gap(6).overflow_y_scrollbar()
       .on_mouse_up("left", (_e, cx) => this.drop(cx)) // releasing in the gap between buttons still lands the drop
       .on_mouse_down_out((_e, cx) => {                // pressing outside the rail: clear any leftover drag state
@@ -924,60 +840,8 @@ export default class RailButton extends View {
         this.pressPos = null;
         cx.notify();
       })
-      .when(fit !== null, (el) => el.child(fit))
       .children(list.map(row))
       .child(add);
-  }
-
-  // Fit the rail into the layout on screen. Writing layouts/<name>.json is the mechanism, because
-  // Herdr reloads layout files at once while the click state in layouts/.state/ stays as it was;
-  // layout.set would drop that state. Herdr's own layouts are restored on every start, so there the
-  // shown tree plus the rail is saved under a free personal name and switched to.
-  async fit(cx) {
-    const name = shared("layout");
-    const tree = layout();
-    if (!name || !tree) return;
-    if (hasRail(tree)) {
-      notify({ title: "The rail is already in this layout", body: `${name} has a rail-button block`, level: "info", timeout: 4000 });
-      cx.notify();
-      return;
-    }
-
-    if (await isShippedLayout(name)) {
-      const target = await freeLayoutName(name + "-rail");
-      await writeLayoutFile(target, withRail(tree), null);
-      run("layout.switch", { name: target });
-      notify({
-        title: "Rail added to a new layout",
-        body: `"${name}" belongs to Herdr and is replaced on every start, so the rail went into "${target}" and that layout is shown now.`,
-        level: "success",
-        timeout: 7000,
-      });
-      return;
-    }
-
-    const path = homePath() + "/layouts/" + name + ".json";
-    const raw = await readTextFile(path).catch(() => null);
-    let base = tree;
-    if (raw) {
-      try { base = JSON.parse(raw); } catch { base = tree; }
-    }
-    if (hasRail(base)) { cx.notify(); return; }
-
-    await writeLayoutFile(name, withRail(base), raw);
-    cx.notify();
-
-    // The file write is what makes this stick; if this build does not reload layout files, push the
-    // same tree through the command instead (it loses the click state, so it is the fallback only).
-    cx.timer.after(900, (cx) => {
-      if (hasRail(layout())) {
-        notify({ title: "Rail added to this layout", body: `${name} now has a 44px rail on the right`, level: "success", timeout: 4000 });
-      } else {
-        run("layout.set", { layout: withRail(layout()) });
-        notify({ title: "Rail added to this layout", body: `${name} now has a 44px rail on the right`, level: "success", timeout: 4000 });
-      }
-      cx.notify();
-    });
   }
 
   addForm() {
